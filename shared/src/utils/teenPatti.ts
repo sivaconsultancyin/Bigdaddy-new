@@ -68,10 +68,25 @@ export function createDeck(): Card[] {
   return deck;
 }
 
+function secureRandomIndex(maxExclusive: number): number {
+  const cryptoObj = globalThis.crypto;
+  if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
+    const buf = new Uint32Array(1);
+    const limit = Math.floor(0x100000000 / maxExclusive) * maxExclusive;
+    while (true) {
+      cryptoObj.getRandomValues(buf);
+      if (buf[0] < limit) {
+        return buf[0] % maxExclusive;
+      }
+    }
+  }
+  return Math.floor(Math.random() * maxExclusive);
+}
+
 export function shuffleDeck(deck: Card[]): Card[] {
   const shuffled = [...deck];
   for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = secureRandomIndex(i + 1);
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
   return shuffled;

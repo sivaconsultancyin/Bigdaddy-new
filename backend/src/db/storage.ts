@@ -289,6 +289,35 @@ export class StorageEngine {
       description: 'Initial welcome balance to Player Charlie',
     });
 
+    // PLAYER 2 (Testing Player account created under Admin Bravo)
+    const testPlayer: StoredUser = {
+      id: 'user-player-test',
+      username: 'testplayer',
+      email: 'testplayer@bigdaddy.casino',
+      passwordHash: bcrypt.hashSync('Test@1234', salt),
+      role: UserRole.PLAYER,
+      parentId: adminUser.id,
+      referralCode: 'TEST777',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    this.users.set(testPlayer.id, testPlayer);
+    const testPlayerWallet = this.createWalletForUser(testPlayer.id, WalletType.PLAYER);
+    this.referralCodes.set('TEST777', {
+      code: 'TEST777',
+      ownerUserId: testPlayer.id,
+      adminId: adminUser.id,
+      active: true,
+    });
+    this.executeTransfer({
+      sourceWalletId: adminWallet.id,
+      targetWalletId: testPlayerWallet.id,
+      amount: '50000',
+      type: TransactionType.ROLE_TO_PLAYER,
+      idempotencyKey: 'SEED_PLAYER_TEST',
+      description: 'Initial testing balance to testplayer',
+    });
+
     // 5. Seed a pending token request for demonstration
     this.createTokenRequest({
       requesterId: playerCharlie.id,
@@ -393,6 +422,7 @@ export class StorageEngine {
 
     return {
       maxSupply: MAX_TOKEN_SUPPLY,
+      circulating: (circulatingRoles + gamePools + escrow).toString(),
       treasuryBalance: treasury.toString(),
       gamePoolsBalance: gamePools.toString(),
       roleWalletsBalance: circulatingRoles.toString(),

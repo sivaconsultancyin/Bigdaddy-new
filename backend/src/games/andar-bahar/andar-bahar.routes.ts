@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { andarBaharEngine } from './andar-bahar.engine';
 import { authenticateJWT, AuthenticatedRequest } from '../../middleware/auth.middleware';
+import { AuthService } from '../../services/auth.service';
 import { UserRole } from '../../../../shared/src/types';
 import { SYSTEM_WALLETS } from '../../../../shared/src/constants';
 import { db } from '../../db/storage';
@@ -10,15 +11,26 @@ export const andarBaharRouter = Router();
 // GET /api/games/andar-bahar/state
 andarBaharRouter.get('/state', (req, res: Response) => {
   const poolWallet = db.getWallet(SYSTEM_WALLETS.ANDAR_BAHAR_POOL);
+  const authHeader = req.headers.authorization;
+  let myBets: any[] = [];
+  if (authHeader?.startsWith('Bearer ')) {
+    const payload = AuthService.verifyToken(authHeader.slice(7));
+    if (payload?.id) {
+      myBets = andarBaharEngine
+        .getCurrentRoundBets()
+        .filter((b) => b.userId === payload.id);
+    }
+  }
   return res.json({
     game: 'andar-bahar',
     name: 'Andar Bahar Live',
     status: 'ACTIVE',
     minBet: '10',
     maxBet: '200000',
-    poolBalance: poolWallet ? poolWallet.balance : '2000000',
+    poolBalance: poolWallet ? poolWallet.balance : '0',
     round: andarBaharEngine.getPublicRoundState(),
     allBets: andarBaharEngine.getCurrentRoundBets(),
+    myBets,
     history: andarBaharEngine.getHistory(),
   });
 });

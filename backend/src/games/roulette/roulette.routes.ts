@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { rouletteEngine } from './roulette.engine';
 import { authenticateJWT, AuthenticatedRequest } from '../../middleware/auth.middleware';
+import { AuthService } from '../../services/auth.service';
 import { rouletteSpinSchema } from '../../../../shared/src/schemas';
 import { UserRole } from '../../../../shared/src/types';
 import { SYSTEM_WALLETS } from '../../../../shared/src/constants';
@@ -11,6 +12,14 @@ export const rouletteRouter = Router();
 // GET /api/games/roulette/state
 rouletteRouter.get('/state', (req, res: Response) => {
   const poolWallet = db.getWallet(SYSTEM_WALLETS.ROULETTE_POOL);
+  const authHeader = req.headers.authorization;
+  let myBets: any[] = [];
+  if (authHeader?.startsWith('Bearer ')) {
+    const payload = AuthService.verifyToken(authHeader.slice(7));
+    if (payload?.id) {
+      myBets = rouletteEngine.getCurrentRoundBets(payload.id);
+    }
+  }
   return res.json({
     game: 'roulette',
     name: 'European Roulette',
@@ -20,6 +29,7 @@ rouletteRouter.get('/state', (req, res: Response) => {
     poolBalance: poolWallet ? poolWallet.balance : '0',
     round: rouletteEngine.getPublicRoundState(),
     allBets: rouletteEngine.getCurrentRoundBets(),
+    myBets,
     history: rouletteEngine.getHistory(),
   });
 });

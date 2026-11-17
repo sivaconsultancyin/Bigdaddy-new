@@ -18,14 +18,14 @@ export const ApiStatusBanner: React.FC = () => {
       Icon: Activity,
     },
     online: {
-      label: 'API Online',
-      detail: 'Backend reachable · Database connected',
+      label: 'Engines Active',
+      detail: 'In-APK Game Engines · Wallet synced',
       className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
       Icon: CheckCircle2,
     },
     degraded: {
       label: 'API Degraded',
-      detail: 'Backend responds, but database or readiness checks are failing',
+      detail: 'Backend responds, but readiness checks are failing',
       className: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
       Icon: AlertTriangle,
     },

@@ -53,8 +53,8 @@ export const ConfigStatusModal: React.FC<ConfigStatusModalProps> = ({ isOpen, on
           </div>
           <p className="text-xs text-zinc-300 leading-relaxed">
             {isPreview
-              ? 'Running in standalone local mode. All balances, double-entry ledger transfers, bets, and game results are processed in-memory by the local Express HTTP server.'
-              : 'Running in Production Mode connected to an authoritative backend and verified cryptographic secrets.'}
+              ? 'All 6 game engines execute natively inside the APK / client. Wallet balances & double-entry ledger use local fallback storage until Supabase env keys are set.'
+              : 'All 6 game engines execute natively inside the APK / client, while authoritative wallet balances and double-entry ledger transfers persist in Supabase.'}
           </p>
         </div>
 
@@ -63,20 +63,20 @@ export const ConfigStatusModal: React.FC<ConfigStatusModalProps> = ({ isOpen, on
           <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-900/50 border border-zinc-800">
             <div className="flex items-center gap-2 text-zinc-300">
               <Database className="w-4 h-4 text-amber-400" />
-              <span>Database Engine:</span>
+              <span>Wallet Ledger:</span>
             </div>
             <span className="font-mono text-zinc-300 font-semibold">
-              In-Memory Authoritative Store
+              {isPreview ? 'Local Fallback (No Supabase Keys)' : 'Supabase PostgreSQL'}
             </span>
           </div>
 
           <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-900/50 border border-zinc-800">
             <div className="flex items-center gap-2 text-zinc-300">
               <Key className="w-4 h-4 text-emerald-400" />
-              <span>Token Balances & Transactions:</span>
+              <span>Game Engines:</span>
             </div>
             <span className="font-mono text-amber-400 font-bold">
-              {isPreview ? 'Local Ledger Tokens' : 'Real Authoritative Ledger'}
+              In-APK Local Engines (6/6)
             </span>
           </div>
 
@@ -86,7 +86,7 @@ export const ConfigStatusModal: React.FC<ConfigStatusModalProps> = ({ isOpen, on
               <span>External Credentials:</span>
             </div>
             <span className="font-mono text-zinc-400">
-              Not Required
+              {isPreview ? 'Optional (Supabase URL + Key)' : 'Configured'}
             </span>
           </div>
         </div>
@@ -95,10 +95,10 @@ export const ConfigStatusModal: React.FC<ConfigStatusModalProps> = ({ isOpen, on
         <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-[11px] text-zinc-300 space-y-1.5 mb-6">
           <div className="flex items-center gap-1.5 font-bold text-amber-300">
             <AlertTriangle className="w-3.5 h-3.5" />
-            <span>Standalone Local Mode</span>
+            <span>APK + Supabase Split Architecture</span>
           </div>
           <p className="leading-relaxed text-zinc-400">
-            All API endpoints, live game loops, and double-entry wallet transfers run directly in the local Node.js server on port 3000.
+            Game state loops run locally inside the APK with zero HTTP latency, while ONLY wallet balances and ledger transfers live in Supabase.
           </p>
         </div>
 

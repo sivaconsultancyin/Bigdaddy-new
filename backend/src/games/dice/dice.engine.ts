@@ -245,19 +245,39 @@ export class DiceEngine {
     });
     if (this.history.length > 25) this.history.pop();
 
+    const updatedPoolWallet = db.getWallet(SYSTEM_WALLETS.DICE_POOL);
+
     this.emit('dice:round_result', {
       round: this.getPublicRoundState(),
       rolledNumber: rolled,
       winners,
       history: this.getHistory(),
       serverSeed: this.serverSeed,
-      poolBalance: poolWallet ? poolWallet.balance : '0',
+      poolBalance: updatedPoolWallet ? updatedPoolWallet.balance : '0',
     });
 
     // Schedule transition to next round
     this.timer = setTimeout(() => {
       this.startBettingPhase();
     }, this.RESULT_DURATION_MS);
+  }
+
+  private getDiceMultiplier(type: string, rolled: number): number {
+    const numVal = parseInt(type, 10);
+    if (!isNaN(numVal) && String(numVal) === type && numVal >= 1 && numVal <= 10) {
+      return numVal === rolled ? 9 : 0;
+    }
+    if (type === 'small' && rolled <= 5) return 2;
+    if (type === 'big' && rolled >= 6) return 2;
+    if (type === 'even' && rolled % 2 === 0) return 2;
+    if (type === 'odd' && rolled % 2 !== 0) return 2;
+    return 0;
+  }
+
+  private isValidDiceMarket(type: string): boolean {
+    if (['small', 'big', 'even', 'odd'].includes(type)) return true;
+    if (/^(10|[1-9])$/.test(type)) return true;
+    return false;
   }
 
   // --- 4. PLAYER BET PLACEMENT ---
@@ -283,15 +303,51 @@ export class DiceEngine {
     const userWallet = db.getWalletByUserId(params.userId);
     if (!userWallet) throw new Error('User wallet not found');
 
+    if (!Array.isArray(params.bets) || params.bets.length < 1 || params.bets.length > 20) {
+      throw new Error('Please provide between 1 and 20 valid bets');
+    }
+
     let totalRequested = 0n;
     for (const b of params.bets) {
+      const market = String(b.type || '').trim().toLowerCase();
+      if (!this.isValidDiceMarket(market)) {
+        throw new Error(`Unsupported Dice bet market: ${b.type}`);
+      }
+      if (!/^\d+$/.test(String(b.amount))) {
+        throw new Error('Bet amount must be a positive integer');
+      }
       const amt = BigInt(b.amount);
-      if (amt <= 0n) throw new Error('Bet amount must be greater than 0');
+      if (amt < 10n || amt > 100000n) {
+        throw new Error('Each Dice bet must be between 10 and 100,000 tokens');
+      }
       totalRequested += amt;
     }
 
     const poolWallet = db.getWallet(SYSTEM_WALLETS.DICE_POOL);
-    if (!poolWallet || BigInt(poolWallet.balance) < totalRequested * 9n) {
+    if (!poolWallet) {
+      throw new Error('Dice Game Pool is unavailable');
+    }
+
+    // Worst-case payout across rolled numbers 1..10 (stakes are transferred into DICE_POOL)
+    const existingRealBets = Array.from(this.currentBets.values()).filter((b) => !b.userId.startsWith('sim-'));
+    let maxRoundPayout = 0n;
+    for (let rolled = 1; rolled <= 10; rolled++) {
+      let outcomePayout = 0n;
+      for (const b of existingRealBets) {
+        const mult = BigInt(this.getDiceMultiplier(b.type, rolled));
+        if (mult > 0n) outcomePayout += BigInt(b.amount) * mult;
+      }
+      for (const b of params.bets) {
+        const market = String(b.type).trim().toLowerCase();
+        const mult = BigInt(this.getDiceMultiplier(market, rolled));
+        if (mult > 0n) outcomePayout += BigInt(b.amount) * mult;
+      }
+      if (outcomePayout > maxRoundPayout) {
+        maxRoundPayout = outcomePayout;
+      }
+    }
+
+    if (BigInt(poolWallet.balance) + totalRequested < maxRoundPayout) {
       throw new Error('Dice Game Pool liquidity is currently low. Please contact Admin.');
     }
 
@@ -314,14 +370,15 @@ export class DiceEngine {
 
     const createdBets: DiceRoundBet[] = [];
     for (const b of params.bets) {
+      const market = String(b.type || '').trim().toLowerCase();
       const betId = `dice-bet-${crypto.randomUUID()}`;
       const roundBet: DiceRoundBet = {
         id: betId,
         roundId: this.currentRound.id,
         userId: params.userId,
         username: params.username,
-        type: b.type,
-        amount: b.amount,
+        type: market,
+        amount: String(b.amount),
         createdAt: new Date().toISOString(),
       };
 
@@ -333,8 +390,8 @@ export class DiceEngine {
         BigInt(this.currentRound.totalBetAmount) + BigInt(b.amount)
       ).toString();
 
-      const prevNumAmt = this.currentRound.numberBetsAmount[b.type] || '0';
-      this.currentRound.numberBetsAmount[b.type] = (
+      const prevNumAmt = this.currentRound.numberBetsAmount[market] || '0';
+      this.currentRound.numberBetsAmount[market] = (
         BigInt(prevNumAmt) + BigInt(b.amount)
       ).toString();
 

@@ -32,7 +32,7 @@ export class DragonTigerEngine {
   private roundCount = 0;
 
   private BETTING_DURATION_MS = 12000;  // 12 seconds betting phase
-  private REVEAL_DURATION_MS = 4500;   // 4.5 seconds card reveal & clash
+  private REVEAL_DURATION_MS = 6000;   // 6.0 seconds slow deal & suspenseful staggered card reveal
   private RESULT_DURATION_MS = 5500;   // 5.5 seconds celebration & roadmap display
 
   private dragonCard: Card | null = null;
@@ -219,7 +219,7 @@ export class DragonTigerEngine {
                 targetWalletId: userWallet.id,
                 amount: payoutNum.toString(),
                 type: TransactionType.BET_WIN_PAYOUT,
-                idempotencyKey: `dt-win-${bet.id}-${Date.now()}`,
+                idempotencyKey: `dt-win-${this.currentRound.id}-${bet.id}`,
                 description: `Dragon Tiger Win - Round #${this.currentRound.roundNumber} on ${bet.type.toUpperCase()}`,
                 metadata: { roundNumber: this.currentRound.roundNumber, betType: bet.type, multiplier },
               });
@@ -244,11 +244,13 @@ export class DragonTigerEngine {
     });
     if (this.history.length > 20) this.history.pop();
 
+    const updatedPoolWallet = db.getWallet(SYSTEM_WALLETS.DRAGON_TIGER_POOL);
+
     this.emit('dragon_tiger:round_result', {
       round: this.getPublicRoundState(),
       winners,
       history: this.getHistory(),
-      poolBalance: poolWallet ? poolWallet.balance : '2000000',
+      poolBalance: updatedPoolWallet ? updatedPoolWallet.balance : '0',
     });
 
     // Schedule transition to next round
@@ -285,6 +287,34 @@ export class DragonTigerEngine {
       const amt = BigInt(b.amount);
       if (amt < 10n || amt > 100000n) throw new Error('BET_OUT_OF_RANGE');
       totalRequested += amt;
+    }
+
+    const poolWallet = db.getWallet(SYSTEM_WALLETS.DRAGON_TIGER_POOL);
+    if (!poolWallet) {
+      throw new Error('Dragon Tiger Game Pool is unavailable');
+    }
+
+    // Worst-case payout across dragon / tiger / tie
+    const existingRealBets = Array.from(this.currentBets.values()).filter((b) => !b.userId.startsWith('sim-'));
+    const payoutByOutcome: Record<'dragon' | 'tiger' | 'tie', bigint> = { dragon: 0n, tiger: 0n, tie: 0n };
+    for (const b of existingRealBets) {
+      const t = String(b.type).toLowerCase() as 'dragon' | 'tiger' | 'tie';
+      if (t === 'dragon') payoutByOutcome.dragon += BigInt(b.amount) * 2n;
+      else if (t === 'tiger') payoutByOutcome.tiger += BigInt(b.amount) * 2n;
+      else if (t === 'tie') payoutByOutcome.tie += BigInt(b.amount) * 9n;
+    }
+    for (const b of params.bets) {
+      const t = String(b.type).toLowerCase() as 'dragon' | 'tiger' | 'tie';
+      if (t === 'dragon') payoutByOutcome.dragon += BigInt(b.amount) * 2n;
+      else if (t === 'tiger') payoutByOutcome.tiger += BigInt(b.amount) * 2n;
+      else if (t === 'tie') payoutByOutcome.tie += BigInt(b.amount) * 9n;
+    }
+    const maxPayout = [payoutByOutcome.dragon, payoutByOutcome.tiger, payoutByOutcome.tie].reduce(
+      (max, v) => (v > max ? v : max),
+      0n
+    );
+    if (BigInt(poolWallet.balance) + totalRequested < maxPayout) {
+      throw new Error('Dragon Tiger Game Pool liquidity is currently low. Please contact Admin.');
     }
 
     if (BigInt(userWallet.balance) < totalRequested) {

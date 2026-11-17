@@ -24,7 +24,7 @@ authRouter.post('/login', async (req, res: Response) => {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
     const token = AuthService.generateToken(user);
-    const wallet = db.getWalletByUserId(user.id);
+    const wallet = user.role === UserRole.OWNER ? db.getTreasuryWallet() : db.getWalletByUserId(user.id);
     const { passwordHash: _, ...safeUser } = user;
     return res.json({ token, user: safeUser, wallet });
   } catch (error) {
@@ -183,7 +183,8 @@ authRouter.get('/me', authenticateJWT, async (req: AuthenticatedRequest, res: Re
   const user = db.getUserById(req.user!.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
   const { passwordHash: _, ...safeUser } = user;
-  return res.json({ user: safeUser, wallet: db.getWalletByUserId(user.id) });
+  const wallet = user.role === UserRole.OWNER ? db.getTreasuryWallet() : db.getWalletByUserId(user.id);
+  return res.json({ user: safeUser, wallet });
 });
 
 // GET /api/auth/users

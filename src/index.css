@@ -17,6 +17,8 @@
   body, #root {
     min-height: 100vh;
     min-height: 100dvh;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   input, select, textarea {
     min-width: 0;

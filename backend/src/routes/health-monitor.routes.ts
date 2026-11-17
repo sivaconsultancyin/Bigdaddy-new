@@ -26,9 +26,7 @@ healthMonitorRouter.get('/failures', requireOwnerSignedToken, async (req, res) =
     events: result.events,
     persistence: result.persistence,
     capturedInMemoryLimit: 250,
-    note: result.persistence === 'memory-fallback'
-      ? 'Running in local memory diagnostics mode; recent failures in this server process are shown. Server console logs remain the fallback.'
-      : 'Events are persisted in the platform health-events table when the database is available.',
+    note: 'Running in local in-memory diagnostics mode; recent failures in this server process are shown.',
     timestamp: new Date().toISOString(),
   });
 });

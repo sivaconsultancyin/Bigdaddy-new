@@ -3,6 +3,7 @@ import { db } from '../db/storage';
 import { authenticateJWT, requireRole, AuthenticatedRequest } from '../middleware/auth.middleware';
 import { allocatePoolSchema } from '../../../shared/src/schemas';
 import { UserRole } from '../../../shared/src/types';
+import { BACKEND_GAME_MODULES } from '../games';
 
 export const gameRouter = Router();
 
@@ -10,6 +11,19 @@ export const gameRouter = Router();
 gameRouter.get('/list', (req, res: Response) => {
   const games = db.getGames();
   return res.json({ games });
+});
+
+// GET /api/games/engines
+gameRouter.get('/engines', (_req, res: Response) => {
+  const games = db.getGames();
+  const byCode = new Map(games.map((g) => [g.code, g]));
+  return res.json({
+    runningInBackend: true,
+    serverTime: new Date().toISOString(),
+    engines: BACKEND_GAME_MODULES.map((mod) =>
+      mod.getEngineStatus(byCode.get(mod.code)?.poolBalance ?? '0')
+    ),
+  });
 });
 
 // POST /api/games/allocate-pool (OWNER only)

@@ -11,12 +11,7 @@ import { tokenRequestRouter } from './backend/src/routes/tokenRequest.routes';
 import { gameRouter } from './backend/src/routes/game.routes';
 import { auditRouter } from './backend/src/routes/audit.routes';
 import { healthMonitorRouter } from './backend/src/routes/health-monitor.routes';
-import { aviatorRouter } from './backend/src/games/aviator/aviator.routes';
-import { rouletteRouter } from './backend/src/games/roulette/roulette.routes';
-import { diceRouter } from './backend/src/games/dice/dice.routes';
-import { dragonTigerRouter } from './backend/src/games/dragon-tiger/dragon-tiger.routes';
-import { andarBaharRouter } from './backend/src/games/andar-bahar/andar-bahar.routes';
-import { teenPattiRouter } from './backend/src/games/teen-patti/teen-patti.routes';
+import { getBackendGameRouters, mountBackendGameModules } from './backend/src/games';
 import { recordHealthFailure } from './backend/src/services/health-monitor.service';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -44,12 +39,7 @@ async function startServer() {
     gameRouter,
     auditRouter,
     healthMonitorRouter,
-    aviatorRouter,
-    rouletteRouter,
-    diceRouter,
-    dragonTigerRouter,
-    andarBaharRouter,
-    teenPattiRouter,
+    ...getBackendGameRouters(),
   ];
   routers.forEach(wrapAsyncRouter);
 
@@ -63,7 +53,7 @@ async function startServer() {
     next();
   });
 
-  app.use(express.json({ limit: '256kb' }));
+  app.use(express.json({ limit: '8mb' }));
 
   app.use((req, res, next) => {
     const requestId = randomUUID();
@@ -156,12 +146,7 @@ async function startServer() {
   app.use('/api/auth', authRouter);
   app.use('/api/wallet', walletRouter);
   app.use('/api/requests', tokenRequestRouter);
-  app.use('/api/games/aviator', aviatorRouter);
-  app.use('/api/games/roulette', rouletteRouter);
-  app.use('/api/games/dice', diceRouter);
-  app.use(['/api/games/dragon-tiger', '/api/games/dragon_tiger'], dragonTigerRouter);
-  app.use(['/api/games/andar-bahar', '/api/games/andar_bahar'], andarBaharRouter);
-  app.use(['/api/games/teen-patti', '/api/games/teen_patti'], teenPattiRouter);
+  mountBackendGameModules(app);
   app.use('/api/games', gameRouter);
   app.use('/api/audit', auditRouter);
 

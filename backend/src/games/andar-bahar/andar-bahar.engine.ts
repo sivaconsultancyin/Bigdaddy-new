@@ -314,7 +314,7 @@ export class AndarBaharEngine {
                 targetWalletId: userWallet.id,
                 amount: payoutNum.toString(),
                 type: TransactionType.BET_WIN_PAYOUT,
-                idempotencyKey: `ab-win-${bet.id}-${Date.now()}`,
+                idempotencyKey: `ab-win-${this.currentRound.id}-${bet.id}`,
                 description: `Andar Bahar Win - Round #${this.currentRound.roundNumber} on ${bet.type.toUpperCase()}`,
                 metadata: { roundNumber: this.currentRound.roundNumber, betType: bet.type, multiplier },
               });
@@ -340,17 +340,42 @@ export class AndarBaharEngine {
     });
     if (this.history.length > 20) this.history.pop();
 
+    const updatedPoolWallet = db.getWallet(SYSTEM_WALLETS.ANDAR_BAHAR_POOL);
+
     this.emit('andar_bahar:round_result', {
       round: this.getPublicRoundState(),
       winners,
       history: this.getHistory(),
-      poolBalance: poolWallet ? poolWallet.balance : '2000000',
+      poolBalance: updatedPoolWallet ? updatedPoolWallet.balance : '0',
     });
 
     // Schedule transition to next round
     this.timer = setTimeout(() => {
       this.startBettingPhase();
     }, this.RESULT_DURATION_MS);
+  }
+
+  private getMaxMultiplierForMarket(market: string): number {
+    switch (market) {
+      case 'andar':
+      case 'bahar':
+        return 2;
+      case 'joker_red':
+      case 'joker_black':
+        return 2;
+      case 'cards_1_5':
+        return 4;
+      case 'cards_6_10':
+        return 5;
+      case 'cards_11_15':
+        return 6;
+      case 'cards_16_25':
+        return 5;
+      case 'cards_25_plus':
+        return 25;
+      default:
+        return 0;
+    }
   }
 
   // --- 4. PLAYER BET PLACEMENT ---
@@ -376,11 +401,40 @@ export class AndarBaharEngine {
     const userWallet = db.getWalletByUserId(params.userId);
     if (!userWallet) throw new Error('User wallet not found');
 
+    if (!Array.isArray(params.bets) || params.bets.length < 1 || params.bets.length > 20) {
+      throw new Error('Please provide between 1 and 20 valid bets');
+    }
+
     let totalRequested = 0n;
+    let incomingMaxPayout = 0n;
     for (const b of params.bets) {
+      const market = String(b.type || '').trim().toLowerCase();
+      const maxMult = this.getMaxMultiplierForMarket(market);
+      if (maxMult <= 0) {
+        throw new Error(`Unsupported Andar Bahar bet market: ${b.type}`);
+      }
+      if (!/^\d+$/.test(String(b.amount))) {
+        throw new Error('Bet amount must be a positive integer');
+      }
       const amt = BigInt(b.amount);
-      if (amt <= 0n) throw new Error('Bet amount must be greater than 0');
+      if (amt < 10n || amt > 200000n) {
+        throw new Error('Each Andar Bahar bet must be between 10 and 200,000 tokens');
+      }
       totalRequested += amt;
+      incomingMaxPayout += amt * BigInt(maxMult);
+    }
+
+    const poolWallet = db.getWallet(SYSTEM_WALLETS.ANDAR_BAHAR_POOL);
+    if (!poolWallet) {
+      throw new Error('Andar Bahar Game Pool is unavailable');
+    }
+
+    const existingRealExposure = Array.from(this.currentBets.values())
+      .filter((b) => !b.userId.startsWith('sim-'))
+      .reduce((sum, b) => sum + BigInt(b.amount) * BigInt(Math.max(1, this.getMaxMultiplierForMarket(b.type))), 0n);
+
+    if (BigInt(poolWallet.balance) + totalRequested < existingRealExposure + incomingMaxPayout) {
+      throw new Error('Andar Bahar Game Pool liquidity is currently low. Please contact Admin.');
     }
 
     if (BigInt(userWallet.balance) < totalRequested) {
@@ -403,14 +457,15 @@ export class AndarBaharEngine {
     // Record individual bets
     const createdBets: AndarBaharRoundBet[] = [];
     for (const b of params.bets) {
+      const market = String(b.type || '').trim().toLowerCase();
       const betId = `ab-bet-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
       const roundBet: AndarBaharRoundBet = {
         id: betId,
         roundId: this.currentRound.id,
         userId: params.userId,
         username: params.username,
-        type: b.type,
-        amount: b.amount,
+        type: market,
+        amount: String(b.amount),
         createdAt: new Date().toISOString(),
       };
 
@@ -423,11 +478,11 @@ export class AndarBaharEngine {
         BigInt(this.currentRound.totalBetAmount) + BigInt(b.amount)
       ).toString();
 
-      if (b.type === 'andar') {
+      if (market === 'andar') {
         this.currentRound.andarBetAmount = (
           BigInt(this.currentRound.andarBetAmount) + BigInt(b.amount)
         ).toString();
-      } else if (b.type === 'bahar') {
+      } else if (market === 'bahar') {
         this.currentRound.baharBetAmount = (
           BigInt(this.currentRound.baharBetAmount) + BigInt(b.amount)
         ).toString();

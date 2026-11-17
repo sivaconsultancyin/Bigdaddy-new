@@ -3,12 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { ApiClient } from '../api/client';
 import { GameInfo, LedgerEntry, TokenRequest, TokenRequestStatus } from '../../../shared/src/types';
 import { TokenRequestModal } from '../components/common/TokenRequestModal';
-import { AviatorGame } from '../games/aviator/AviatorGame';
-import { RouletteGame } from '../games/roulette/RouletteGame';
-import { TeenPattiGame } from '../games/teen-patti/TeenPattiGame';
-import { DiceGame } from '../games/dice/DiceGame';
-import { DragonTigerGame } from '../games/dragon-tiger/DragonTigerGame';
-import { AndarBaharGame } from '../games/andar-bahar/AndarBaharGame';
+import { getFrontendGameModule } from '../games';
 import { PlayerAdminPaymentCard } from '../components/common/PlayerAdminPaymentCard';
 import {
   Coins,
@@ -94,24 +89,10 @@ export const PlayerDashboard: React.FC = () => {
     }
   };
 
-  const normalizedGameCode = activeGameCode?.replace(/_/g, '-') || null;
-  if (normalizedGameCode === 'aviator') {
-    return <AviatorGame onBackToLobby={() => setActiveGameCode(null)} />;
-  }
-  if (normalizedGameCode === 'roulette') {
-    return <RouletteGame onBackToLobby={() => setActiveGameCode(null)} />;
-  }
-  if (normalizedGameCode === 'teen-patti') {
-    return <TeenPattiGame onBackToLobby={() => setActiveGameCode(null)} />;
-  }
-  if (normalizedGameCode === 'dice') {
-    return <DiceGame onBackToLobby={() => setActiveGameCode(null)} />;
-  }
-  if (normalizedGameCode === 'dragon-tiger') {
-    return <DragonTigerGame onBackToLobby={() => setActiveGameCode(null)} />;
-  }
-  if (normalizedGameCode === 'andar-bahar') {
-    return <AndarBaharGame onBackToLobby={() => setActiveGameCode(null)} />;
+  const activeGameModule = getFrontendGameModule(activeGameCode);
+  if (activeGameModule) {
+    const ActiveGameComponent = activeGameModule.Component;
+    return <ActiveGameComponent onBackToLobby={() => setActiveGameCode(null)} />;
   }
 
   return (

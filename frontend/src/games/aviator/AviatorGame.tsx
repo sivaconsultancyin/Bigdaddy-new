@@ -4,7 +4,7 @@ import { AviatorCanvas } from './AviatorCanvas';
 import { AviatorBetPanel } from './AviatorBetPanel';
 import { AviatorBetsList } from './AviatorBetsList';
 import { AviatorBet, BetStatus } from '../../../../shared/src/types';
-import { ApiClient } from '../../api/client';
+import { AviatorApi } from './aviator.api';
 import { ShieldCheck, ArrowLeft, Users, ChevronDown, ChevronUp, X, CheckCircle2, AlertTriangle } from 'lucide-react';
 
 interface AviatorGameProps {
@@ -37,7 +37,7 @@ export const AviatorGame: React.FC<AviatorGameProps> = ({ onBackToLobby }) => {
 
   // Fetch initial round bets and keep synced from polled state
   useEffect(() => {
-    ApiClient.getAviatorState()
+    AviatorApi.getState()
       .then((data) => {
         if (Array.isArray(data?.bets)) setBets(data.bets);
       })

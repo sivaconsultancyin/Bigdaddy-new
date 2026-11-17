@@ -116,22 +116,25 @@ export class RouletteEngine {
         return 9;  // 8 to 1
       case 'line':
         return 6;  // 5 to 1
-      case 'col1':
-      case 'col2':
-      case 'col3':
-      case 'dozen1':
-      case 'dozen2':
-      case 'dozen3':
-        return 3;  // 2 to 1
-      case 'red':
-      case 'black':
-      case 'even':
-      case 'odd':
-      case 'low':
-      case 'high':
-        return 2;  // 1 to 1
       default:
         return 0;
+    }
+  }
+
+  private getExpectedNumbersCount(type: string): number | null {
+    switch (type) {
+      case 'straight':
+        return 1;
+      case 'split':
+        return 2;
+      case 'street':
+        return 3;
+      case 'corner':
+        return 4;
+      case 'line':
+        return 6;
+      default:
+        return null;
     }
   }
 
@@ -152,42 +155,6 @@ export class RouletteEngine {
       case 'corner':
       case 'line':
         return numbers.includes(winningNumber);
-
-      case 'red':
-        return RED_NUMBERS.has(winningNumber);
-
-      case 'black':
-        return BLACK_NUMBERS.has(winningNumber);
-
-      case 'even':
-        return winningNumber % 2 === 0;
-
-      case 'odd':
-        return winningNumber % 2 !== 0;
-
-      case 'low':
-        return winningNumber >= 1 && winningNumber <= 18;
-
-      case 'high':
-        return winningNumber >= 19 && winningNumber <= 36;
-
-      case 'dozen1':
-        return winningNumber >= 1 && winningNumber <= 12;
-
-      case 'dozen2':
-        return winningNumber >= 13 && winningNumber <= 24;
-
-      case 'dozen3':
-        return winningNumber >= 25 && winningNumber <= 36;
-
-      case 'col1':
-        return winningNumber % 3 === 1;
-
-      case 'col2':
-        return winningNumber % 3 === 2;
-
-      case 'col3':
-        return winningNumber % 3 === 0;
 
       default:
         return false;
@@ -240,11 +207,11 @@ export class RouletteEngine {
 
   private scheduleSimulatedBets() {
     const simPlayers = [
-      { name: 'arjun_pro', bets: [{ type: 'red', numbers: [], amount: '100' }] },
-      { name: 'lucky_strike', bets: [{ type: 'dozen2', numbers: [], amount: '50' }, { type: 'straight', numbers: [17], amount: '20' }] },
-      { name: 'vegas_king', bets: [{ type: 'black', numbers: [], amount: '250' }] },
-      { name: 'priya_99', bets: [{ type: 'even', numbers: [], amount: '50' }] },
-      { name: 'rahul_ace', bets: [{ type: 'high', numbers: [], amount: '150' }, { type: 'col1', numbers: [], amount: '50' }] },
+      { name: 'arjun_pro', bets: [{ type: 'straight', numbers: [7], amount: '100' }] },
+      { name: 'lucky_strike', bets: [{ type: 'straight', numbers: [17], amount: '50' }, { type: 'straight', numbers: [23], amount: '20' }] },
+      { name: 'vegas_king', bets: [{ type: 'straight', numbers: [0], amount: '250' }] },
+      { name: 'priya_99', bets: [{ type: 'straight', numbers: [32], amount: '50' }] },
+      { name: 'rahul_ace', bets: [{ type: 'straight', numbers: [14], amount: '150' }, { type: 'straight', numbers: [29], amount: '50' }] },
     ];
 
     const delays = [2500, 5500, 8500, 11000];
@@ -375,41 +342,53 @@ export class RouletteEngine {
 
         // 1. Refund winning stakes from Escrow
         if (winningEscrowRefundBigInt > 0n) {
-          db.executeTransfer({
-            sourceWalletId: SYSTEM_WALLETS.BET_ESCROW,
-            targetWalletId: playerWallet.id,
-            amount: winningEscrowRefundBigInt.toString(),
-            type: TransactionType.BET_ESCROW_REFUND,
-            idempotencyKey: `ROULETTE_REFUND_${spinId}`,
-            description: `Roulette Round #${this.currentRound.roundNumber} Winning Stakes Refund`,
-            metadata: { roundId: this.currentRound.id, winningNumber },
-          });
+          try {
+            db.executeTransfer({
+              sourceWalletId: SYSTEM_WALLETS.BET_ESCROW,
+              targetWalletId: playerWallet.id,
+              amount: winningEscrowRefundBigInt.toString(),
+              type: TransactionType.BET_ESCROW_REFUND,
+              idempotencyKey: `ROULETTE_REFUND_${spinId}`,
+              description: `Roulette Round #${this.currentRound.roundNumber} Winning Stakes Refund`,
+              metadata: { roundId: this.currentRound.id, winningNumber },
+            });
+          } catch (err) {
+            console.error('Roulette stake refund transfer failed:', err);
+          }
         }
 
         // 2. Pay net winnings from Roulette Game Pool
         if (winningPoolNetWinBigInt > 0n) {
-          db.executeTransfer({
-            sourceWalletId: SYSTEM_WALLETS.ROULETTE_POOL,
-            targetWalletId: playerWallet.id,
-            amount: winningPoolNetWinBigInt.toString(),
-            type: TransactionType.BET_WIN_PAYOUT,
-            idempotencyKey: `ROULETTE_WIN_${spinId}`,
-            description: `Roulette Round #${this.currentRound.roundNumber} Payout (Number ${winningNumber})`,
-            metadata: { roundId: this.currentRound.id, winningNumber },
-          });
+          try {
+            db.executeTransfer({
+              sourceWalletId: SYSTEM_WALLETS.ROULETTE_POOL,
+              targetWalletId: playerWallet.id,
+              amount: winningPoolNetWinBigInt.toString(),
+              type: TransactionType.BET_WIN_PAYOUT,
+              idempotencyKey: `ROULETTE_WIN_${spinId}`,
+              description: `Roulette Round #${this.currentRound.roundNumber} Payout (Number ${winningNumber})`,
+              metadata: { roundId: this.currentRound.id, winningNumber },
+            });
+          } catch (err) {
+            console.error('Roulette win payout transfer failed:', err);
+          }
         }
 
-        // 3. Transfer losing bets from Escrow to Owner Treasury
+        // 3. Transfer losing bets from Escrow to Roulette Game Pool
         if (losingEscrowBigInt > 0n) {
-          db.executeTransfer({
-            sourceWalletId: SYSTEM_WALLETS.BET_ESCROW,
-            targetWalletId: SYSTEM_WALLETS.TREASURY,
-            amount: losingEscrowBigInt.toString(),
-            type: TransactionType.BET_LOSS_TREASURY,
-            idempotencyKey: `ROULETTE_LOSS_${spinId}`,
-            description: `Roulette Round #${this.currentRound.roundNumber} House Edge / Loss to Treasury`,
-            metadata: { roundId: this.currentRound.id, winningNumber },
-          });
+          try {
+            db.executeTransfer({
+              sourceWalletId: SYSTEM_WALLETS.BET_ESCROW,
+              targetWalletId: SYSTEM_WALLETS.ROULETTE_POOL,
+              amount: losingEscrowBigInt.toString(),
+              type: TransactionType.BET_LOSS_TREASURY,
+              idempotencyKey: `ROULETTE_LOSS_${spinId}`,
+              description: `Roulette Round #${this.currentRound.roundNumber} Loss to Roulette Pool`,
+              metadata: { roundId: this.currentRound.id, winningNumber },
+            });
+          } catch (err) {
+            console.error('Roulette loss transfer failed:', err);
+          }
         }
       }
 
@@ -436,9 +415,9 @@ export class RouletteEngine {
 
     this.lastSettledWinners = winnersSummary;
 
-    // Get current pool balance
+    // Get current pool balance after settlement
     const poolWallet = db.getWallet(SYSTEM_WALLETS.ROULETTE_POOL);
-    const poolBalance = poolWallet ? poolWallet.balance : '2000000';
+    const poolBalance = poolWallet ? poolWallet.balance : '0';
 
     this.emit('roulette:round_result', {
       round: this.getPublicRoundState(),
@@ -493,13 +472,43 @@ export class RouletteEngine {
       throw new Error('At least one bet is required');
     }
 
-    // 3. Compute total bet amount
+    // 3. Validate bet types, inside-bet numbers, & compute total bet amount
     let totalBetBigInt = 0n;
+    const normalizedBets: RouletteBetInput[] = [];
     for (const bet of params.bets) {
+      if (this.getMultiplier(bet.type) <= 0) {
+        throw new Error(`Unsupported roulette bet type: ${bet.type}`);
+      }
+      if (!/^\d+$/.test(String(bet.amount))) {
+        throw new Error('Bet amount must be a positive integer');
+      }
       const amt = BigInt(bet.amount);
       if (amt <= 0n) {
         throw new Error('Each bet amount must be greater than zero');
       }
+
+      const expectedCount = this.getExpectedNumbersCount(bet.type);
+      let validatedNumbers: number[] = [];
+      if (expectedCount !== null) {
+        const rawNums = Array.isArray(bet.numbers) ? bet.numbers : [];
+        const uniqueNums = Array.from(new Set(rawNums));
+        if (
+          rawNums.length !== expectedCount ||
+          uniqueNums.length !== expectedCount ||
+          uniqueNums.some((n) => !Number.isInteger(n) || n < 0 || n > 36) ||
+          (bet.type === 'line' && uniqueNums.includes(0))
+        ) {
+          throw new Error(`Invalid numbers selection for ${bet.type} bet`);
+        }
+        validatedNumbers = uniqueNums;
+      }
+
+      normalizedBets.push({
+        id: bet.id,
+        type: bet.type,
+        numbers: validatedNumbers,
+        amount: String(bet.amount),
+      });
       totalBetBigInt += amt;
     }
 
@@ -508,17 +517,40 @@ export class RouletteEngine {
     if (totalBetBigInt < minBet) {
       throw new Error(`Minimum total bet is ${minBet} tokens`);
     }
-    if (totalBetBigInt > maxBet) {
-      throw new Error(`Maximum total bet is ${maxBet} tokens`);
+    const existingUserIds = this.userBetsMap.get(params.userId) || [];
+    const existingUserTotal = existingUserIds.reduce((sum, id) => {
+      const existing = this.currentBets.get(id);
+      return existing ? sum + BigInt(existing.amount) : sum;
+    }, 0n);
+    if (existingUserTotal + totalBetBigInt > maxBet) {
+      throw new Error(`Maximum total bet per round is ${maxBet} tokens`);
     }
 
-    // 4. Pool solvency check
+    // 4. Pool solvency check (worst-case net profit across all 37 pockets for real player bets)
     const poolWallet = db.getWallet(SYSTEM_WALLETS.ROULETTE_POOL);
     if (!poolWallet) {
       throw new Error('European Roulette Game Pool is unavailable');
     }
     const poolBalanceBigInt = BigInt(poolWallet.balance);
-    if (poolBalanceBigInt < totalBetBigInt * 36n && poolBalanceBigInt < totalBetBigInt * 2n) {
+    const existingRealBets = Array.from(this.currentBets.values()).filter((b) => !b.userId.startsWith('sim-'));
+    let maxNetLiability = 0n;
+    for (let n = 0; n <= 36; n++) {
+      let outcomeNetProfit = 0n;
+      for (const b of existingRealBets) {
+        if (this.checkBetWin(b, n)) {
+          outcomeNetProfit += BigInt(b.amount) * BigInt(this.getMultiplier(b.type) - 1);
+        }
+      }
+      for (const b of normalizedBets) {
+        if (this.checkBetWin(b, n)) {
+          outcomeNetProfit += BigInt(b.amount) * BigInt(this.getMultiplier(b.type) - 1);
+        }
+      }
+      if (outcomeNetProfit > maxNetLiability) {
+        maxNetLiability = outcomeNetProfit;
+      }
+    }
+    if (poolBalanceBigInt < maxNetLiability) {
       throw new Error('Roulette Game Pool liquidity is currently low. Please contact Admin.');
     }
 
@@ -541,14 +573,14 @@ export class RouletteEngine {
       type: TransactionType.BET_ESCROW_LOCK,
       idempotencyKey: params.idempotencyKey ? `ROULETTE_LOCK_${params.idempotencyKey}` : `ROULETTE_LOCK_${lockId}`,
       description: `European Roulette Round #${this.currentRound.roundNumber} Stake Escrowed`,
-      metadata: { roundId: this.currentRound.id, betCount: params.bets.length },
+      metadata: { roundId: this.currentRound.id, betCount: normalizedBets.length },
     });
 
     // 7. Store placed bets in current round
     const userBetIds: string[] = this.userBetsMap.get(params.userId) || [];
     const addedBets: RouletteRoundBet[] = [];
 
-    for (const b of params.bets) {
+    for (const b of normalizedBets) {
       const betId = b.id || `bet-${params.userId}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       const roundBet: RouletteRoundBet = {
         id: betId,

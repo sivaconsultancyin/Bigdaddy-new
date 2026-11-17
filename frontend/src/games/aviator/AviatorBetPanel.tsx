@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { ApiClient } from '../../api/client';
+import { AviatorApi } from './aviator.api';
 import { AviatorBet, BetStatus } from '../../../../shared/src/types';
 import confetti from 'canvas-confetti';
 import { Sparkles, Check, AlertCircle } from 'lucide-react';
@@ -39,7 +39,7 @@ export const AviatorBetPanel: React.FC<AviatorBetPanelProps> = ({
         pendingBetRequest.current = { amount: betAmount, key: 'aviator-bet-' + crypto.randomUUID() };
       }
       const requestKey = pendingBetRequest.current.key;
-      const res = await ApiClient.placeAviatorBet({ amount: betAmount }, requestKey);
+      const res = await AviatorApi.placeBet({ amount: betAmount }, requestKey);
 
       pendingBetRequest.current = null;
       // The bet is confirmed by the server; update the game UI immediately.
@@ -59,7 +59,7 @@ export const AviatorBetPanel: React.FC<AviatorBetPanelProps> = ({
     setLoading(true);
 
     try {
-      const res = await ApiClient.cashoutAviatorBet({
+      const res = await AviatorApi.cashoutBet({
         betId: activeBet.id,
       });
 

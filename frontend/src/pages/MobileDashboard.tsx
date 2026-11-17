@@ -14,16 +14,7 @@ import {
 import { TokenRequestModal } from '../components/common/TokenRequestModal';
 import { ApiHealthPanel } from '../components/owner/ApiHealthPanel';
 import { CreateUserModal } from '../components/common/CreateUserModal';
-import { AviatorGame } from '../games/aviator/AviatorGame';
-import { RouletteGame } from '../games/roulette/RouletteGame';
-import { RoulettePreview } from '../games/roulette/RoulettePreview';
-import { TeenPattiGame } from '../games/teen-patti/TeenPattiGame';
-import { DiceGame } from '../games/dice/DiceGame';
-import { DicePreview } from '../games/dice/DicePreview';
-import { DragonTigerGame } from '../games/dragon-tiger/DragonTigerGame';
-import { DragonTigerPreview } from '../games/dragon-tiger/DragonTigerPreview';
-import { AndarBaharGame } from '../games/andar-bahar/AndarBaharGame';
-import { AndarBaharPreview } from '../games/andar-bahar/AndarBaharPreview';
+import { getFrontendGameModule } from '../games';
 import { MobileTab } from '../components/common/MobileBottomNav';
 import { AdminPaymentSettingsCard } from '../components/common/AdminPaymentSettingsCard';
 import { PlayerAdminPaymentCard } from '../components/common/PlayerAdminPaymentCard';
@@ -154,22 +145,33 @@ export const MobileDashboard: React.FC<MobileDashboardProps> = ({
       }
 
       if (hasStaffRole) {
-        const [usersData, auditData] = await Promise.all([
-          ApiClient.getUsers().catch(() => ({ users: [] })),
-          ApiClient.getAuditLogs().catch(() => ({ logs: [] })),
+        const usersPromise = ApiClient.getUsers().catch(() => ({ users: [] }));
+        const auditPromise = isOwner ? ApiClient.getAuditLogs().catch(() => ({ logs: [] })) : Promise.resolve({ logs: [] });
+        const supplyPromise = isOwner ? ApiClient.getSupplySummary().catch(() => null) : Promise.resolve(null);
+
+        const [usersData, auditData, supp] = await Promise.all([
+          usersPromise,
+          auditPromise,
+          supplyPromise,
         ]);
+
         if (usersData.users) {
           setUsers(usersData.users);
-          if (!transferTargetId && usersData.users.length > 0) {
-            setTransferTargetId(usersData.users[0].id);
+          const eligibleTargets = usersData.users.filter((u: User) =>
+            isOwner
+              ? u.role === UserRole.SUPER_ADMIN
+              : isSuperAdmin
+              ? u.role === UserRole.ADMIN
+              : isAdmin
+              ? u.role === UserRole.PLAYER
+              : false
+          );
+          if (!transferTargetId && eligibleTargets.length > 0) {
+            setTransferTargetId(eligibleTargets[0].id);
           }
         }
         if (auditData.logs) setAuditLogs(auditData.logs);
-
-        if (isOwner || isSuperAdmin) {
-          const supp = await ApiClient.getSupplySummary().catch(() => null);
-          if (supp) setSupply(supp);
-        }
+        if (supp) setSupply(supp);
       }
     } catch (err) {
       console.error('Error loading mobile dashboard data', err);
@@ -261,27 +263,11 @@ export const MobileDashboard: React.FC<MobileDashboardProps> = ({
     }
   };
 
-  // If a game screen is active, render it exclusively for Player accounts
-  const normalizedActiveGameCode = activeGameCode?.replace(/_/g, '-') || null;
-  if (isPlayer && normalizedActiveGameCode) {
-    if (normalizedActiveGameCode === 'aviator') {
-      return <AviatorGame onBackToLobby={() => setActiveGameCode(null)} />;
-    }
-    if (normalizedActiveGameCode === 'roulette') {
-      return <RouletteGame onBackToLobby={() => setActiveGameCode(null)} />;
-    }
-    if (normalizedActiveGameCode === 'teen-patti') {
-      return <TeenPattiGame onBackToLobby={() => setActiveGameCode(null)} />;
-    }
-    if (normalizedActiveGameCode === 'andar-bahar') {
-      return <AndarBaharGame onBackToLobby={() => setActiveGameCode(null)} />;
-    }
-    if (normalizedActiveGameCode === 'dragon-tiger') {
-      return <DragonTigerGame onBackToLobby={() => setActiveGameCode(null)} />;
-    }
-    if (normalizedActiveGameCode === 'dice') {
-      return <DiceGame onBackToLobby={() => setActiveGameCode(null)} />;
-    }
+  // If a game screen is active, render it exclusively for Player accounts via game module registry
+  const activeGameModule = isPlayer ? getFrontendGameModule(activeGameCode) : undefined;
+  if (activeGameModule) {
+    const ActiveGameComponent = activeGameModule.Component;
+    return <ActiveGameComponent onBackToLobby={() => setActiveGameCode(null)} />;
   }
 
   // Games Card is STRICTLY for Player accounts only!
@@ -658,8 +644,8 @@ export const MobileDashboard: React.FC<MobileDashboardProps> = ({
               {isOwner
                 ? 'Genesis 10 Billion max supply authority'
                 : configInfo?.isSimulated
-                ? 'Isolated preview balance; simulated only.'
-                : 'Stored in PostgreSQL with a double-entry ledger.'}
+                ? 'Isolated preview balance; in-memory ledger only.'
+                : 'Stored in the in-memory double-entry ledger.'}
             </span>
           </div>
 
@@ -813,11 +799,21 @@ export const MobileDashboard: React.FC<MobileDashboardProps> = ({
                   onChange={(e) => setTransferTargetId(e.target.value)}
                   className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-200"
                 >
-                  {users.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.username} ({u.role})
-                    </option>
-                  ))}
+                  {users
+                    .filter((u) =>
+                      isOwner
+                        ? u.role === UserRole.SUPER_ADMIN
+                        : isSuperAdmin
+                        ? u.role === UserRole.ADMIN
+                        : isAdmin
+                        ? u.role === UserRole.PLAYER
+                        : false
+                    )
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.username} ({u.role})
+                      </option>
+                    ))}
                 </select>
               </div>
               <div>

@@ -164,6 +164,11 @@ export class TeenPattiEngine {
       throw new Error(`Insufficient balance for boot amount ₹${bootAmount}`);
     }
 
+    const poolWalletCheck = db.getWallet(SYSTEM_WALLETS.TEEN_PATTI_POOL);
+    if (!poolWalletCheck || BigInt(poolWalletCheck.balance) < BigInt(bootAmount)) {
+      throw new Error('Teen Patti Game Pool liquidity is currently low. Please contact Admin.');
+    }
+
     const nextRoundNumber = this.globalRoundCounter + 1;
     const txKey = params.idempotencyKey
       ? `TP_BOOT_${params.idempotencyKey}`
@@ -298,11 +303,15 @@ export class TeenPattiEngine {
       const poolWallet = db.getWallet(SYSTEM_WALLETS.TEEN_PATTI_POOL);
       this.emit('teen_patti:round_settled', { userId: params.userId, table: sanitized });
 
-      return {
+      const result = {
         table: sanitized,
         wallet: userWallet,
         poolBalance: poolWallet ? poolWallet.balance : '0',
       };
+      if (params.idempotencyKey) {
+        this.rememberIdempotentResult(params.idempotencyKey, result);
+      }
+      return result;
     }
 
     if (params.action === 'chaal' || params.action === 'blind') {
@@ -319,6 +328,11 @@ export class TeenPattiEngine {
 
       if (BigInt(userWallet.balance) < BigInt(requestedAmount)) {
         throw new Error('Insufficient balance for Chaal');
+      }
+
+      const poolWalletCheck = db.getWallet(SYSTEM_WALLETS.TEEN_PATTI_POOL);
+      if (!poolWalletCheck || BigInt(poolWalletCheck.balance) < BigInt(table.pot + requestedAmount)) {
+        throw new Error('Teen Patti Game Pool liquidity is currently low. Please contact Admin.');
       }
 
       const txKey = params.idempotencyKey

@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { User, Wallet, AppConfigInfo } from '../../../shared/src/types';
 import { ApiClient } from '../api/client';
+import { walletService } from '../services/supabaseWallet';
 
 interface AuthContextType {
   user: User | null;
@@ -28,55 +29,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [configError, setConfigError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const userRef = useRef<User | null>(null);
+  userRef.current = user;
 
-  const loadConfig = async () => {
-    try {
-      const cfg = await ApiClient.getConfig();
-      setConfigInfo(cfg);
-    } catch (err: any) {
-      if (err.message?.includes('PRODUCTION_CONFIGURATION_ERROR')) {
-        setConfigError(err.message);
-      }
-    }
-  };
-
-  const refreshUser = async () => {
-    const token = ApiClient.getToken();
-    if (!token) {
-      setLoading(false);
-      return;
-    }
-    try {
-      const data = await ApiClient.getMe();
-      if (!data?.user?.id) {
-        throw new Error('The server returned an invalid session response. Please sign in again.');
-      }
-      setUser(data.user);
-      setWallet(data.wallet);
-      setAuthError(null);
-    } catch (err: any) {
-      const message = err?.message || 'Could not verify your session. Please try again.';
-      if (message.includes('PRODUCTION_CONFIGURATION_ERROR')) setConfigError(message);
-
-      // A transient network/database error is not proof that a saved token is invalid.
-      // Only clear credentials when the API explicitly indicates an invalid session.
-      if (isInvalidSessionError(message)) {
-        ApiClient.clearToken();
-        setUser(null);
-        setWallet(null);
-        setAuthError('Your session has expired. Please sign in again.');
-      } else {
-        setAuthError(`Could not verify your session: ${message}`);
-        console.warn('Session verification failed; keeping token for retry:', message);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const refreshWallet = async () => {
-    const token = ApiClient.getToken();
-    if (!token) return;
+  const refreshWallet = useCallback(async () => {
+    const activeUser = userRef.current ?? ApiClient.getCurrentSessionUser();
+    if (!activeUser) return;
     try {
       const data = await ApiClient.getMyWallet();
       if (data?.wallet) setWallet(data.wallet);
@@ -89,10 +47,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAuthError('Your session has expired. Please sign in again.');
         return;
       }
-      setAuthError(`Could not refresh wallet: ${message}`);
-      console.warn('Could not refresh wallet:', message);
+      console.warn('Could not refresh Supabase wallet:', message);
     }
-  };
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    const token = ApiClient.getToken();
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const data = await ApiClient.getMe();
+      if (!data?.user?.id) {
+        throw new Error('The session response was incomplete. Please sign in again.');
+      }
+      ApiClient.setCurrentSessionUser(data.user);
+      setUser(data.user);
+      setWallet(data.wallet ?? null);
+      setAuthError(null);
+    } catch (err: any) {
+      const message = err?.message || 'Could not verify your session. Please try again.';
+      if (message.includes('PRODUCTION_CONFIGURATION_ERROR')) setConfigError(message);
+
+      if (isInvalidSessionError(message)) {
+        ApiClient.clearToken();
+        setUser(null);
+        setWallet(null);
+        setAuthError('Your session has expired. Please sign in again.');
+      } else {
+        setAuthError(`Could not verify your session: ${message}`);
+        console.warn('Session verification failed; keeping token for retry:', message);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     const initialize = async () => {
@@ -110,19 +100,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     };
     void initialize();
-  }, []);
+  }, [refreshUser]);
+
+  // Live subscription to Supabase WalletService updates (instant UI sync when APK game engines settle bets)
+  useEffect(() => {
+    const unsub = walletService.subscribe((event) => {
+      const active = userRef.current;
+      if (!active) return;
+      if (!event.userId || event.userId === active.id) {
+        void refreshWallet();
+      }
+    });
+    return unsub;
+  }, [refreshWallet]);
 
   const login = async (credentials: { username: string; password: string }) => {
-    // `loading` controls the app's initial session bootstrap. Do not toggle it
-    // during a login attempt: App may unmount Login while loading is true,
-    // discarding the component's error state when authentication fails.
     setAuthError(null);
     try {
       const data = await ApiClient.login(credentials);
       if (!data?.token || !data?.user?.id) {
-        throw new Error('The server returned an incomplete login response. Please try again.');
+        throw new Error('Login response was incomplete. Please try again.');
       }
       ApiClient.setToken(data.token);
+      ApiClient.setCurrentSessionUser(data.user);
       setUser(data.user);
       setWallet(data.wallet ?? null);
     } catch (err: any) {

@@ -59,16 +59,23 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
 
   // Winning pocket highlight pulse
   const [settledNumber, setSettledNumber] = useState<number | null>(null);
-  const [isHovered, setIsHovered] = useState<boolean>(false);
+  const settledNumberRef = useRef<number | null>(null);
+  const onSpinCompleteRef = useRef(onSpinComplete);
+  onSpinCompleteRef.current = onSpinComplete;
+
+  useEffect(() => {
+    settledNumberRef.current = settledNumber;
+  }, [settledNumber]);
 
   // Keep targetNumberRef updated
   useEffect(() => {
     targetNumberRef.current = targetNumber;
     if (!isSpinningRef.current && targetNumber !== null) {
+      settledNumberRef.current = targetNumber;
       setSettledNumber(targetNumber);
     }
     // If targetNumber arrives mid-spin and trajectory is active, smoothly update target pocket
-    if (isSpinningRef.current && trajectoryRef.current && targetNumber !== null) {
+    if (isSpinningRef.current && trajectoryRef.current && !trajectoryRef.current.completed && targetNumber !== null) {
       const idx = WHEEL_NUMBERS.indexOf(targetNumber);
       if (idx !== -1) {
         const sectorAngle = (2 * Math.PI) / 37;
@@ -128,18 +135,17 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
     isSpinningRef.current = isSpinning;
 
     if (isSpinning) {
+      settledNumberRef.current = null;
       setSettledNumber(null);
       const now = Date.now();
-      let duration = spinDurationRef.current;
+      let duration = spinDuration;
 
       if (spinEndsAt && spinEndsAt > now) {
         const remaining = spinEndsAt - now;
         duration = Math.max(1000, remaining);
-        spinDurationRef.current = duration;
-        spinStartTimeRef.current = performance.now();
-      } else {
-        spinStartTimeRef.current = performance.now();
       }
+      spinDurationRef.current = duration;
+      spinStartTimeRef.current = performance.now();
 
       // Initialize trajectory
       const target = targetNumberRef.current ?? 0;
@@ -148,7 +154,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
       // Finished spinning
       trajectoryRef.current = null;
     }
-  }, [isSpinning, spinEndsAt, setupSpinTrajectory]);
+  }, [isSpinning, spinEndsAt, spinDuration, setupSpinTrajectory]);
 
   const handleCanvasClick = useCallback(() => {
     if (!isSpinning && onManualSpinRequest) {
@@ -289,9 +295,10 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
         if (!traj.completed && progress >= 0.98) {
           traj.completed = true;
           isSpinningRef.current = false;
+          settledNumberRef.current = traj.targetNumber;
           setSettledNumber(traj.targetNumber);
-          if (onSpinComplete) {
-            onSpinComplete(traj.targetNumber);
+          if (onSpinCompleteRef.current) {
+            onSpinCompleteRef.current(traj.targetNumber);
           }
         }
       } else {
@@ -302,7 +309,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
         wheelAngleRef.current = (wheelAngleRef.current + 0.5 * dt) % (2 * Math.PI);
 
         // Ball is locked inside the settled winning pocket and moves seamlessly with the rotor
-        const targetNum = settledNumber ?? targetNumberRef.current ?? 0;
+        const targetNum = settledNumberRef.current ?? targetNumberRef.current ?? 0;
         const targetIdx = WHEEL_NUMBERS.indexOf(targetNum);
         const safeIdx = targetIdx !== -1 ? targetIdx : 0;
         const pocketAngleOnRotor = safeIdx * sectorAngle + sectorAngle / 2;
@@ -400,7 +407,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
         }
 
         // Highlight settled winning pocket
-        const isWinningPocket = settledNumber === num;
+        const isWinningPocket = settledNumberRef.current === num;
 
         ctx.beginPath();
         ctx.arc(0, 0, pocketOuterR, startAng, endAng);
@@ -518,7 +525,7 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
       ctx.shadowBlur = 0;
 
       // Golden halo spotlight when settled on a winning number
-      if (settledNumber !== null) {
+      if (settledNumberRef.current !== null) {
         const pulse = 1 + 0.18 * Math.sin(currentTime * 0.008);
         ctx.beginPath();
         ctx.arc(bx, by, (ballSize + 3.5) * pulse, 0, Math.PI * 2);
@@ -542,17 +549,15 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
         cancelAnimationFrame(animFrameRef.current);
       }
     };
-  }, [size, onSpinComplete]);
+  }, [size]);
 
   return (
     <div className="relative flex flex-col items-center justify-center select-none">
       <div
-        className="relative rounded-full shadow-[0_0_35px_rgba(0,0,0,0.85)] border border-amber-500/20 group cursor-pointer"
+        className="relative rounded-full shadow-[0_0_35px_rgba(0,0,0,0.85)] border border-amber-500/20 group"
         style={{ width: size, height: size }}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
         onClick={handleCanvasClick}
-        title={!isSpinning ? 'Click wheel to test spin' : 'Roulette Wheel Spinning...'}
+        title={isSpinning ? 'Roulette Wheel Spinning...' : 'European Roulette Wheel'}
       >
         <canvas
           ref={canvasRef}
@@ -601,14 +606,6 @@ export const RouletteWheel: React.FC<RouletteWheelProps> = ({
           </div>
         )}
 
-        {/* Interactive Click to Test Spin Hint on Hover (when not spinning) */}
-        {!isSpinning && isHovered && onManualSpinRequest && (
-          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 pointer-events-none">
-            <div className="bg-zinc-900/90 border border-amber-400/50 backdrop-blur-sm px-2 py-0.5 rounded-full text-[9px] font-semibold text-amber-300 shadow-md">
-              🌀 Click to Test Spin
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

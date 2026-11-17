@@ -1,0 +1,25 @@
+import type { CapacitorConfig } from '@capacitor/cli';
+
+const config: CapacitorConfig = {
+  appId: 'com.bigdaddy.casino',
+  appName: 'BigDaddy Casino',
+  webDir: 'dist',
+  backgroundColor: '#050608',
+  server: {
+    androidScheme: 'https',
+  },
+  android: {
+    allowMixedContent: false,
+    captureInput: true,
+    webContentsDebuggingEnabled: false,
+  },
+  plugins: {
+    StatusBar: {
+      overlaysWebView: false,
+      style: 'DARK',
+      backgroundColor: '#050608',
+    },
+  },
+};
+
+export default config;

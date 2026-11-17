@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from '../frontend/src/context/AuthContext';
 import { GameStateProvider } from '../frontend/src/context/GameStateContext';
 import { Header } from '../frontend/src/components/common/Header';
@@ -12,6 +12,7 @@ import { Login } from '../frontend/src/pages/Login';
 import { AlertTriangle } from 'lucide-react';
 import { ApiStatusBanner } from '../frontend/src/components/common/ApiStatusBanner';
 import { UserRole } from '../shared/src/types';
+import { initAndroidNativeShell, registerAndroidBackHandler } from '../frontend/src/utils/androidBridge';
 
 const MainLayout: React.FC = () => {
   const { user, loading, refreshWallet, refreshUser, configError, authError } = useAuth();
@@ -20,6 +21,32 @@ const MainLayout: React.FC = () => {
   const [isTokenRequestOpen, setIsTokenRequestOpen] = useState(false);
   const [pendingRequestsCount, setPendingRequestsCount] = useState<number>(0);
   const isPlayer = user?.role === UserRole.PLAYER;
+
+  useEffect(() => {
+    void initAndroidNativeShell();
+  }, []);
+
+  useEffect(() => {
+    return registerAndroidBackHandler(() => {
+      if (isTokenRequestOpen) {
+        setIsTokenRequestOpen(false);
+        return true;
+      }
+      if (activeGameCode) {
+        setActiveGameCode(null);
+        return true;
+      }
+      if (activeTab !== 'games' && isPlayer) {
+        setActiveTab('games');
+        return true;
+      }
+      if (!isPlayer && activeTab !== 'dashboard') {
+        setActiveTab('dashboard');
+        return true;
+      }
+      return false;
+    });
+  }, [isTokenRequestOpen, activeGameCode, activeTab, isPlayer]);
 
   if (configError) {
     return (

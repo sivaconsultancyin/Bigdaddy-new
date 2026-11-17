@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useGameState } from '../../context/GameStateContext';
-import { ApiClient } from '../../api/client';
+import { DiceApi } from './dice.api';
 import { diceAudio } from './DiceAudio';
 import { CssDiceArena } from './CssDiceArena';
 
@@ -187,7 +187,7 @@ export const DiceGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackToLobb
       idempotencyKey = `dice-bet-${crypto.randomUUID()}`;
       pendingKeys.set(fingerprint, idempotencyKey);
     }
-    const result = await ApiClient.placeDiceBet({ bets }, idempotencyKey);
+    const result = await DiceApi.placeBet({ bets }, idempotencyKey);
     pendingKeys.delete(fingerprint);
     return result;
   };
@@ -338,7 +338,7 @@ export const DiceGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackToLobb
   // Handle Verify Roll
   const handleVerify = async () => {
     try {
-      const res = await ApiClient.verifyDiceRoll({ serverSeed: verifyServerSeed });
+      const res = await DiceApi.verifyRoll({ serverSeed: verifyServerSeed });
       setVerifyResult(res.calculatedRoll);
     } catch (e: any) {
       setErrorMessage(e.message || 'Verification error');

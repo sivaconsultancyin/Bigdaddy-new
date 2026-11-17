@@ -10,7 +10,17 @@ import {
   Share2,
   CheckCircle,
   X,
+  KeyRound,
+  LogIn,
 } from 'lucide-react';
+
+const TEST_ACCOUNTS = [
+  { role: 'Player (Test)', username: 'testplayer', password: 'Test@1234', badge: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30', note: '50,000 chips · Play all 6 games' },
+  { role: 'Player (Charlie)', username: 'player_charlie', password: 'Player@1234', badge: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30', note: '10,000 chips · Referral: BIGDADDY777' },
+  { role: 'Admin', username: 'admin_bravo', password: 'Admin@1234', badge: 'bg-blue-500/15 text-blue-300 border-blue-500/30', note: 'Approve requests & manage players' },
+  { role: 'Super Admin', username: 'superadmin_alpha', password: 'SuperAdmin@1234', badge: 'bg-purple-500/15 text-purple-300 border-purple-500/30', note: 'Manage Admins & regional chips' },
+  { role: 'Owner', username: 'owner', password: 'Owner@1234', badge: 'bg-amber-500/15 text-amber-300 border-amber-500/30', note: 'Treasury & game pools authority' },
+] as const;
 
 export const Login: React.FC = () => {
   const { login, configInfo } = useAuth();
@@ -35,6 +45,20 @@ export const Login: React.FC = () => {
     setIsSubmitting(true);
     try {
       await login({ username: username.trim(), password });
+    } catch (err: any) {
+      setError(err?.message || err?.error || 'Authentication failed. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleQuickLogin = async (testUsername: string, testPassword: string) => {
+    setUsername(testUsername);
+    setPassword(testPassword);
+    setError(null);
+    setIsSubmitting(true);
+    try {
+      await login({ username: testUsername, password: testPassword });
     } catch (err: any) {
       setError(err?.message || err?.error || 'Authentication failed. Please try again.');
     } finally {
@@ -83,7 +107,7 @@ export const Login: React.FC = () => {
           </h1>
           <div className="flex items-center justify-center gap-1.5 mt-1">
             <span className="text-[9px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/30 uppercase tracking-widest font-mono font-bold">
-              {configInfo?.mode === AppMode.PRODUCTION ? 'Production · Persistent' : configInfo?.isSimulated ? 'Preview Mode · Simulated' : 'Connecting...'}
+              {configInfo?.mode === AppMode.PRODUCTION ? 'In-APK Engines · Supabase Wallet' : configInfo?.isSimulated ? 'In-APK Engines · Local Wallet' : 'In-APK Ready'}
             </span>
           </div>
           <p className="text-[10px] text-zinc-400 mt-1">
@@ -149,6 +173,51 @@ export const Login: React.FC = () => {
               <Share2 className="w-3.5 h-3.5" />
               <span>Have a referral code? Register</span>
             </button>
+          </div>
+        </div>
+
+        {/* Testing Login Credentials */}
+        <div className="bg-zinc-900/75 border border-zinc-800 rounded-2xl p-3.5 shadow-lg">
+          <div className="flex items-center justify-between mb-2.5 pb-2 border-b border-zinc-800/80">
+            <div className="flex items-center gap-1.5">
+              <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-200">
+                Testing Login Credentials
+              </span>
+            </div>
+            <span className="text-[9px] font-mono text-zinc-400">APK + Supabase Wallet</span>
+          </div>
+
+          <div className="space-y-2">
+            {TEST_ACCOUNTS.map((acc) => (
+              <div
+                key={acc.username}
+                className="flex items-center justify-between gap-2 rounded-xl border border-zinc-800 bg-zinc-950/80 px-2.5 py-2"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${acc.badge}`}>
+                      {acc.role}
+                    </span>
+                    <span className="text-[10px] text-zinc-400 truncate">{acc.note}</span>
+                  </div>
+                  <div className="mt-1 font-mono text-[11px] text-zinc-200 truncate">
+                    <span>{acc.username}</span>
+                    <span className="text-zinc-600 mx-1">/</span>
+                    <span className="text-amber-300">{acc.password}</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => void handleQuickLogin(acc.username, acc.password)}
+                  className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 px-2.5 py-1.5 text-[10px] font-bold text-amber-300 transition active:scale-95 disabled:opacity-50"
+                >
+                  <LogIn className="w-3 h-3" />
+                  <span>Login</span>
+                </button>
+              </div>
+            ))}
           </div>
         </div>
       </div>

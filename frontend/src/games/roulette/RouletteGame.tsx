@@ -1,25 +1,20 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
+  ArrowLeft,
   Volume2,
   VolumeX,
-  RotateCcw,
   Sparkles,
   Coins,
-  History,
   ShieldCheck,
   CheckCircle2,
   AlertCircle,
-  Users,
   Timer,
-  ChevronDown,
-  ChevronUp,
   X,
   Flame,
-  RotateCw,
 } from 'lucide-react';
-import { RouletteWheel, RED_SET, WHEEL_NUMBERS } from './RouletteWheel';
+import { RouletteWheel, RED_SET } from './RouletteWheel';
 import { rouletteAudio } from './RouletteAudio';
-import { ApiClient } from '../../api/client';
+import { RouletteApi } from './roulette.api';
 import { useAuth } from '../../context/AuthContext';
 import { useGameState } from '../../context/GameStateContext';
 import { UserRole } from '../../../../shared/src/types';
@@ -55,19 +50,16 @@ export const RouletteGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackTo
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [showFairnessModal, setShowFairnessModal] = useState<boolean>(false);
-  const [showCommunityDrawer, setShowCommunityDrawer] = useState<boolean>(false);
-  const [poolBalance, setPoolBalance] = useState<string>('2000000');
   const [gameAvailability, setGameAvailability] = useState<'checking' | 'active' | 'unavailable'>('checking');
 
   // Live timer ticker for smooth seconds countdown
   const [timeLeftSec, setTimeLeftSec] = useState<number>(14);
-  const [roundResultData, setRoundResultData] = useState<any | null>(null);
   const [myWinResult, setMyWinResult] = useState<{ totalPayout: number; netProfit: number } | null>(null);
-  const [isTestSpinning, setIsTestSpinning] = useState<boolean>(false);
-  const [testSpinNumber, setTestSpinNumber] = useState<number | null>(null);
   const [lastSettledNumber, setLastSettledNumber] = useState<number | null>(null);
+  const [serverMyBets, setServerMyBets] = useState<any[]>([]);
 
   const lastProcessedRoundIdRef = useRef<string | null>(null);
+  const lastSettledResultIdRef = useRef<string | null>(null);
 
   // Initialize lastSettledNumber from history on mount
   useEffect(() => {
@@ -76,49 +68,17 @@ export const RouletteGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackTo
     }
   }, [authoritativeRound, rouletteHistory, lastSettledNumber]);
 
-  const handleTestSpin = () => {
-    setErrorMessage('Preview spins are disabled. The winning number comes only from the authoritative server round.');
-    setTimeout(() => setErrorMessage(null), 3000);
-  };
-
   const handleSpinComplete = (landedNum: number) => {
     setLastSettledNumber(landedNum);
-
-    // History is populated only from backend-persisted round results.
-
-    if (isTestSpinning) {
-      setIsTestSpinning(false);
-      setTestSpinNumber(null);
-
-      // Evaluate bets if player had staged or locked bets on the table
-      const betsToTest = currentBets.length > 0 ? currentBets : lockedBets;
-      if (betsToTest.length > 0) {
-        let totalWin = 0;
-        let totalBet = 0;
-        for (const b of betsToTest) {
-          totalBet += b.amount;
-          if (checkBetWinLocal(b, landedNum)) {
-            totalWin += b.amount * getMultiplierLocal(b.type);
-          }
-        }
-        if (totalWin > 0) {
-          setMyWinResult({ totalPayout: totalWin, netProfit: totalWin - totalBet });
-          rouletteAudio.playWinFanfare();
-        } else {
-          setMyWinResult({ totalPayout: 0, netProfit: -totalBet });
-        }
-      }
-    }
   };
 
-  // Poll authoritative backend game state for Roulette availability and history.
+  // Poll authoritative backend game state for Roulette availability, myBets, and history.
   useEffect(() => {
     let mounted = true;
     const refreshAvailability = async () => {
       try {
-        const data: any = await ApiClient.getRouletteState();
+        const data: any = await RouletteApi.getState();
         if (!mounted) return;
-        if (data?.poolBalance) setPoolBalance(String(data.poolBalance));
         const ready = data?.status === 'ACTIVE' && Boolean(data?.round) && data?.gameStateUnavailable !== true;
         if (ready) {
           setAuthoritativeRound(data.round);
@@ -128,9 +88,20 @@ export const RouletteGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackTo
             roundNumber: item.roundNumber,
             timestamp: item.timestamp,
           })) : []);
+          if (Array.isArray(data.myBets)) {
+            setServerMyBets(data.myBets);
+            const syncedLocked: RouletteBet[] = data.myBets.map((b: any) => ({
+              id: b.id,
+              type: b.type,
+              numbers: Array.isArray(b.numbers) ? b.numbers : [],
+              amount: Number(b.amount) || 0,
+            }));
+            setLockedBets(syncedLocked);
+          }
         } else {
           setAuthoritativeRound(null);
           setAuthoritativeHistory([]);
+          setServerMyBets([]);
         }
         setGameAvailability(ready ? 'active' : 'unavailable');
       } catch {
@@ -164,7 +135,7 @@ export const RouletteGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackTo
     return () => clearInterval(interval);
   }, [rouletteRound.status, rouletteRound.bettingEndsAt, rouletteRound.spinEndsAt]);
 
-  // Handle round transitions & automatic reset for next round
+  // Handle round transitions, authoritative result announcement & automatic reset
   useEffect(() => {
     // When round changes to BETTING, clear locked bets and stage fresh round
     if (rouletteRound.id !== lastProcessedRoundIdRef.current) {
@@ -173,12 +144,45 @@ export const RouletteGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackTo
         setLockedBets([]);
         setCurrentBets([]);
         setBetHistoryStack([]);
-        setRoundResultData(null);
         setMyWinResult(null);
         if (refreshUser) refreshUser();
       }
     }
-  }, [rouletteRound.id, rouletteRound.status, refreshUser]);
+
+    // Populate win banner & refresh wallet once when authoritative backend RESULT arrives
+    if (
+      rouletteRound.status === 'RESULT' &&
+      rouletteRound.id &&
+      lastSettledResultIdRef.current !== rouletteRound.id
+    ) {
+      lastSettledResultIdRef.current = rouletteRound.id;
+      const winNum = rouletteRound.winningNumber;
+      if (winNum !== null && winNum !== undefined) {
+        setLastSettledNumber(winNum);
+        const settledSource = serverMyBets.length > 0 ? serverMyBets : lockedBets;
+        if (settledSource.length > 0) {
+          let totalWin = 0;
+          let totalBet = 0;
+          for (const b of settledSource) {
+            const amt = Number(b.amount) || 0;
+            totalBet += amt;
+            if (b.payout !== undefined) {
+              totalWin += Number(b.payout) || 0;
+            } else if (checkBetWinLocal({ type: b.type, numbers: b.numbers || [] }, winNum)) {
+              totalWin += amt * getMultiplierLocal(b.type);
+            }
+          }
+          if (totalWin > 0) {
+            setMyWinResult({ totalPayout: totalWin, netProfit: totalWin - totalBet });
+            rouletteAudio.playWinFanfare();
+          } else {
+            setMyWinResult({ totalPayout: 0, netProfit: -totalBet });
+          }
+        }
+      }
+      if (refreshUser) refreshUser();
+    }
+  }, [rouletteRound.id, rouletteRound.status, rouletteRound.winningNumber, lockedBets, serverMyBets, refreshUser]);
 
   // Round outcomes and settlement are read from the backend state poll above.
 
@@ -190,7 +194,6 @@ export const RouletteGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackTo
 
   const stagedBetTotal = currentBets.reduce((acc, b) => acc + b.amount, 0);
   const lockedBetTotal = lockedBets.reduce((acc, b) => acc + b.amount, 0);
-  const totalUserBet = stagedBetTotal + lockedBetTotal;
 
   // Local multiplier table
   const getMultiplierLocal = (type: string): number => {
@@ -200,18 +203,6 @@ export const RouletteGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackTo
       case 'street': return 12;
       case 'corner': return 9;
       case 'line': return 6;
-      case 'col1':
-      case 'col2':
-      case 'col3':
-      case 'dozen1':
-      case 'dozen2':
-      case 'dozen3': return 3;
-      case 'red':
-      case 'black':
-      case 'even':
-      case 'odd':
-      case 'low':
-      case 'high': return 2;
       default: return 0;
     }
   };
@@ -228,30 +219,6 @@ export const RouletteGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackTo
       case 'corner':
       case 'line':
         return bet.numbers.includes(num);
-      case 'red':
-        return RED_SET.has(num);
-      case 'black':
-        return !RED_SET.has(num);
-      case 'even':
-        return num % 2 === 0;
-      case 'odd':
-        return num % 2 !== 0;
-      case 'low':
-        return num >= 1 && num <= 18;
-      case 'high':
-        return num >= 19 && num <= 36;
-      case 'dozen1':
-        return num >= 1 && num <= 12;
-      case 'dozen2':
-        return num >= 13 && num <= 24;
-      case 'dozen3':
-        return num >= 25 && num <= 36;
-      case 'col1':
-        return num % 3 === 1;
-      case 'col2':
-        return num % 3 === 2;
-      case 'col3':
-        return num % 3 === 0;
       default:
         return false;
     }
@@ -266,7 +233,7 @@ export const RouletteGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackTo
     }
 
     const currentBalance = wallet ? parseInt(wallet.balance, 10) : 0;
-    if (totalUserBet + selectedChip > currentBalance) {
+    if (stagedBetTotal + selectedChip > currentBalance) {
       setErrorMessage(`Insufficient token balance! (Available: ${currentBalance.toLocaleString()})`);
       setTimeout(() => setErrorMessage(null), 3000);
       return;
@@ -318,7 +285,7 @@ export const RouletteGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackTo
   const doubleBets = () => {
     if (rouletteRound.status !== 'BETTING' || currentBets.length === 0) return;
     const currentBalance = wallet ? parseInt(wallet.balance, 10) : 0;
-    if (totalUserBet + stagedBetTotal > currentBalance) {
+    if (stagedBetTotal * 2 > currentBalance) {
       setErrorMessage('Insufficient balance to double bets');
       setTimeout(() => setErrorMessage(null), 3000);
       return;
@@ -337,7 +304,7 @@ export const RouletteGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackTo
     if (rouletteRound.status !== 'BETTING' || previousBets.length === 0) return;
     const prevTotal = previousBets.reduce((a, b) => a + b.amount, 0);
     const currentBalance = wallet ? parseInt(wallet.balance, 10) : 0;
-    if (totalUserBet + prevTotal > currentBalance) {
+    if (prevTotal > currentBalance) {
       setErrorMessage('Insufficient balance to rebet previous stake');
       setTimeout(() => setErrorMessage(null), 3000);
       return;
@@ -376,7 +343,7 @@ export const RouletteGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackTo
         })),
       };
 
-      const res: any = await ApiClient.placeRouletteBet(payload, rouletteRound.id, user.id);
+      const res: any = await RouletteApi.placeBet(payload, rouletteRound.id, user.id);
       if (res && res.success) {
         rouletteAudio.playChipSound();
         setPreviousBets([...lockedBets, ...currentBets]);
@@ -395,22 +362,6 @@ export const RouletteGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackTo
     }
   };
 
-  // Get total bet placed on a specific type & number combo (staged + locked)
-  const getCellBetAmount = (type: string, numbers?: number[]) => {
-    let sum = 0;
-    const all = [...lockedBets, ...currentBets];
-    for (const b of all) {
-      if (b.type === type) {
-        if (!numbers || numbers.length === 0) {
-          sum += b.amount;
-        } else if (JSON.stringify(b.numbers) === JSON.stringify(numbers)) {
-          sum += b.amount;
-        }
-      }
-    }
-    return sum;
-  };
-
   const getNumberBetAmount = (num: number) => {
     let sum = 0;
     const all = [...lockedBets, ...currentBets];
@@ -422,23 +373,16 @@ export const RouletteGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackTo
     return sum;
   };
 
-  // Highlight winning cells during result phase or settled state
+  // Highlight winning cells ONLY after settlement (RESULT), never spoil during SPINNING
   const isWinningNumber = (num: number) => {
-    if (rouletteRound.status === 'RESULT') {
-      return (rouletteRound.winningNumber ?? lastSettledNumber) === num;
-    }
-    return lastSettledNumber === num;
+    if (rouletteRound.status !== 'RESULT') return false;
+    return (rouletteRound.winningNumber ?? lastSettledNumber) === num;
   };
 
   const activeDisplayNum =
-    rouletteRound.status === 'SPINNING'
-      ? (rouletteRound.winningNumber ?? testSpinNumber)
-      : (rouletteRound.winningNumber ?? lastSettledNumber ?? (rouletteHistory[0]?.number ?? 0));
-
-  const isWinningType = (type: string) => {
-    if (activeDisplayNum === null || activeDisplayNum === undefined) return false;
-    return checkBetWinLocal({ type, numbers: [] }, activeDisplayNum);
-  };
+    rouletteRound.status === 'RESULT'
+      ? (rouletteRound.winningNumber ?? lastSettledNumber ?? (rouletteHistory[0]?.number ?? null))
+      : null;
 
   const winningColor =
     activeDisplayNum !== null && activeDisplayNum !== undefined
@@ -476,9 +420,17 @@ export const RouletteGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackTo
 
   return (
     <div className="w-full px-2 py-1.5 space-y-1.5 text-zinc-100 pb-12 select-none">
-      {/* 1. TOP STATUS BAR: Multi-Player Indicator, Recent History */}
+      {/* 1. TOP STATUS BAR: Back Navigation, Round Badge, Recent History */}
       <div className="flex items-center justify-between gap-1.5 bg-zinc-900/90 border border-zinc-800/80 rounded-xl px-2.5 py-1.5">
         <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={onBackToLobby}
+            className="p-1.5 rounded-lg bg-zinc-800/90 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700/60 transition active:scale-95"
+            title="Back to Lobby"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+          </button>
           <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-800/80 border border-zinc-700/60 shadow-sm">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
             <span className="text-[10px] font-mono font-bold text-amber-300">
@@ -614,41 +566,29 @@ export const RouletteGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackTo
       {/* 4. 3D ROULETTE WHEEL COMPONENT */}
       <div className="w-full flex flex-col items-center justify-center py-1">
         <RouletteWheel
-          isSpinning={rouletteRound.status === 'SPINNING' || isTestSpinning}
+          isSpinning={rouletteRound.status === 'SPINNING'}
           targetNumber={
-            isTestSpinning
-              ? (testSpinNumber ?? 0)
-              : rouletteRound.status === 'SPINNING'
+            rouletteRound.status === 'SPINNING'
               ? (rouletteRound.winningNumber ?? 0)
               : (lastSettledNumber ?? rouletteRound.winningNumber ?? (rouletteHistory[0]?.number ?? 0))
           }
           spinEndsAt={rouletteRound.status === 'SPINNING' ? rouletteRound.spinEndsAt : null}
-          spinDuration={isTestSpinning ? 8000 : 9500}
+          spinDuration={9500}
           size={255}
           onSpinComplete={handleSpinComplete}
-          onManualSpinRequest={handleTestSpin}
         />
 
         {/* Quick Spin Action & Synced Pocket Status */}
         <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
-          {rouletteRound.status === 'SPINNING' || isTestSpinning ? (
+          {rouletteRound.status === 'SPINNING' ? (
             <div className="flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] font-mono font-bold animate-pulse">
-              <RotateCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
-              <span>WHEEL SPINNING • FAST</span>
+              <Flame className="w-3.5 h-3.5 animate-spin text-amber-400" />
+              <span>WHEEL SPINNING • SERVER RESULT PENDING</span>
             </div>
-          ) : (
-            <button
-              onClick={handleTestSpin}
-              className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-amber-500/15 hover:bg-amber-500/30 border border-amber-400/50 text-amber-300 text-[11px] font-semibold transition active:scale-95 shadow-sm hover:shadow-amber-500/20"
-              title="Spin wheel preview animation"
-            >
-              <RotateCw className="w-3.5 h-3.5 text-amber-400" />
-              <span>Spin Wheel</span>
-            </button>
-          )}
+          ) : null}
 
           {/* Landed pocket indicator showing exact same number as History */}
-          {lastSettledNumber !== null && rouletteRound.status !== 'SPINNING' && !isTestSpinning && (
+          {lastSettledNumber !== null && rouletteRound.status !== 'SPINNING' && (
             <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-zinc-900/90 border border-amber-500/30 text-[11px] shadow-sm">
               <span className="text-zinc-400 text-[10px]">Ball Pocket:</span>
               <span
@@ -698,7 +638,7 @@ export const RouletteGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackTo
           </div>
 
           {/* B. MAIN 3x12 NUMBERS GRID */}
-          <div className="grid grid-cols-12 gap-1 mb-1.5">
+          <div className="grid grid-cols-12 gap-1">
             {/* Row 3 (3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36) */}
             {[3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36].map((num) => {
               const isRed = RED_SET.has(num);
@@ -774,103 +714,6 @@ export const RouletteGame: React.FC<{ onBackToLobby: () => void }> = ({ onBackTo
                   {betAmt > 0 && (
                     <span className="absolute -top-1 -right-1 bg-amber-400 text-black text-[8px] font-mono font-black px-1 rounded-full shadow border border-amber-600">
                       {betAmt >= 1000 ? `${(betAmt / 1000).toFixed(0)}k` : betAmt}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* C. 2 TO 1 COLUMN BETS */}
-          <div className="grid grid-cols-3 gap-1 mb-1.5">
-            {[
-              { type: 'col1', label: '1st Col (2:1)' },
-              { type: 'col2', label: '2nd Col (2:1)' },
-              { type: 'col3', label: '3rd Col (2:1)' },
-            ].map((col) => {
-              const betAmt = getCellBetAmount(col.type);
-              const isWin = isWinningType(col.type);
-              return (
-                <button
-                  key={col.type}
-                  onClick={() => placeBet(col.type, [])}
-                  className={`py-1.5 rounded font-semibold text-[10px] border flex items-center justify-center gap-1 transition relative active:scale-95 ${
-                    isWin
-                      ? 'bg-yellow-400 text-black border-yellow-300 font-bold'
-                      : 'bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border-zinc-700/60'
-                  }`}
-                >
-                  <span>{col.label}</span>
-                  {betAmt > 0 && (
-                    <span className="bg-amber-400 text-black text-[9px] font-mono font-bold px-1 rounded-full">
-                      ₹{betAmt}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* D. DOZENS (1st 12, 2nd 12, 3rd 12) */}
-          <div className="grid grid-cols-3 gap-1 mb-1.5">
-            {[
-              { type: 'dozen1', label: '1st 12 (1-12)' },
-              { type: 'dozen2', label: '2nd 12 (13-24)' },
-              { type: 'dozen3', label: '3rd 12 (25-36)' },
-            ].map((doz) => {
-              const betAmt = getCellBetAmount(doz.type);
-              const isWin = isWinningType(doz.type);
-              return (
-                <button
-                  key={doz.type}
-                  onClick={() => placeBet(doz.type, [])}
-                  className={`py-1.5 rounded font-semibold text-[10px] border flex items-center justify-center gap-1 transition relative active:scale-95 ${
-                    isWin
-                      ? 'bg-yellow-400 text-black border-yellow-300 font-bold'
-                      : 'bg-emerald-900/50 hover:bg-emerald-800/60 text-emerald-200 border-emerald-700/50'
-                  }`}
-                >
-                  <span>{doz.label}</span>
-                  {betAmt > 0 && (
-                    <span className="bg-amber-400 text-black text-[9px] font-mono font-bold px-1 rounded-full">
-                      ₹{betAmt}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* E. OUTSIDE EVEN-MONEY BETS (1-18, EVEN, RED, BLACK, ODD, 19-36) */}
-          <div className="grid grid-cols-6 gap-1">
-            {[
-              { type: 'low', label: '1 - 18' },
-              { type: 'even', label: 'EVEN' },
-              { type: 'red', label: 'RED', isRed: true },
-              { type: 'black', label: 'BLACK', isBlack: true },
-              { type: 'odd', label: 'ODD' },
-              { type: 'high', label: '19 - 36' },
-            ].map((out) => {
-              const betAmt = getCellBetAmount(out.type);
-              const isWin = isWinningType(out.type);
-              return (
-                <button
-                  key={out.type}
-                  onClick={() => placeBet(out.type, [])}
-                  className={`py-2 rounded font-bold text-[10px] border flex flex-col items-center justify-center gap-0.5 transition relative active:scale-95 ${
-                    isWin
-                      ? 'bg-yellow-400 text-black border-yellow-300 font-black'
-                      : out.isRed
-                      ? 'bg-red-700 hover:bg-red-600 text-white border-red-500'
-                      : out.isBlack
-                      ? 'bg-zinc-900 hover:bg-zinc-800 text-zinc-100 border-zinc-700'
-                      : 'bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border-zinc-700/60'
-                  }`}
-                >
-                  <span>{out.label}</span>
-                  {betAmt > 0 && (
-                    <span className="bg-amber-400 text-black text-[8px] font-mono font-bold px-1 rounded-full shadow">
-                      ₹{betAmt}
                     </span>
                   )}
                 </button>
